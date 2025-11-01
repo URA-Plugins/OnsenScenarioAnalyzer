@@ -50,9 +50,9 @@ namespace OnsenScenarioAnalyzer
                         new Layout("干劲").Ratio(3)).Size(3),
                     new Layout("重要信息").Size(5),
                     new Layout("剧本信息").SplitColumns(
-                        new Layout("评价会周期").Ratio(3),
-                        new Layout("岛训练数值").Ratio(3),
-                        new Layout("岛训练人数").Ratio(6)
+                        new Layout("温泉券").Ratio(1),
+                        new Layout("温泉Buff").Ratio(1),
+                        new Layout("挖掘进度").Ratio(2)
                         ).Size(3),
                     //new Layout("分割", new Rule()).Size(1),
                     new Layout("训练信息")  // size 20, 共约30行
@@ -289,8 +289,18 @@ namespace OnsenScenarioAnalyzer
                         _ => $"{I18N_Vital}:[green]{afterVital}[/]/{turn.MaxVital}"
                     });
 
-                    turn.PointGainInfoDictionary.TryGetValue(command.CommandId, out var gain);
-                    table.AddRow($"Lv{command.TrainLevel} | {gain}");
+                    // 不同训练挖掘量
+                    var gain = 0;
+                    if (dataset != null && command.TrainIndex > 0 &&
+                        dataset.command_info_array.Length > command.TrainLevel - 1)
+                    {
+                        var dig_array = dataset.command_info_array[command.TrainIndex - 1].dig_info_array;
+                        if (dig_array.Length > 0)
+                        {
+                            gain = dig_array[0].dig_value;
+                        }
+                    }
+                    table.AddRow($"Lv{command.TrainLevel} | 挖: {gain}");
                     table.AddRow(new Rule());
 
                     var stats = trainStats[command.TrainIndex - 1];
@@ -327,9 +337,48 @@ namespace OnsenScenarioAnalyzer
                 noTrainingTable = true;
             }
 
+            // 剧本信息
+            var bathing = dataset.bathing_info;
+            if (bathing != null)
+            {
+                layout["温泉券"].Update(new Panel($"[cyan]温泉券: {bathing.ticket_num} / 3[/]").Expand());
+                if (bathing.onsen_effect_remain_count > 0) {
+                    if (bathing.superior_state > 0) {
+                        layout["温泉Buff"].Update(new Panel($"[lightgreen]超回复-剩余 {bathing.onsen_effect_remain_count} 回合[/]").Expand());
+                    } else
+                    {
+                        layout["温泉Buff"].Update(new Panel($"[green]普通-剩余 {bathing.onsen_effect_remain_count} 回合[/]").Expand());
+                    }
+                } else
+                {
+                    layout["温泉Buff"].Update(new Panel("[yellow]温泉Buff未生效[/]").Expand());
+                }
+            }
+            // 计算挖掘进度
+            var onsen_info = dataset.onsen_info_array.First(x => x.state == 2);
+            if (onsen_info != null) {
+                var rest = 0;
+                foreach (var layer in onsen_info.stratum_info_array)
+                {
+                    rest += layer.rest_volume;
+                }
+                layout["挖掘进度"].Update(new Panel($"挖掘进度剩余: {rest}").Expand());
+            }
+
             // 额外信息
             var exTable = new Table().AddColumn("Extras");
             exTable.HideHeaders();
+            // 挖掘力
+            if (dataset != null && dataset.dig_effect_info_array.Length >= 3) 
+            {
+                exTable.AddRow(new Markup("挖掘力加成"));
+                for (var i = 0; i < 3; i++)
+                {
+                    var value = dataset.dig_effect_info_array[i];
+                    string[] toolNames = { "砂", "土", "岩" };
+                    exTable.AddRow(new Markup($"{toolNames[i]} Lv {value.item_level} +{value.dig_effect_value}%"));
+                }
+            }
             // 计算连续事件表现
             var eventPerf = EventLogger.PrintCardEventPerf(@event.data.chara_info.scenario_id);
             if (eventPerf.Count > 0)
@@ -340,7 +389,7 @@ namespace OnsenScenarioAnalyzer
             }
 
             layout["日期"].Update(new Panel($"{turn.Year}{I18N_Year} {turn.Month}{I18N_Month}{turn.HalfMonth}").Expand());
-            layout["总属性"].Update(new Panel($"[cyan]总属性: {totalValue}[/]").Expand());
+            layout["总属性"].Update(new Panel($"[cyan]总属性: {totalValue}, Pt: {@event.data.chara_info.skill_point}[/]").Expand());
             layout["体力"].Update(new Panel($"{I18N_Vital}: [green]{turn.Vital}[/]/{turn.MaxVital}").Expand());
             layout["干劲"].Update(new Panel(@event.data.chara_info.motivation switch
             {
@@ -356,6 +405,10 @@ namespace OnsenScenarioAnalyzer
             if (availableTrainingCount <= 1)
             {
                 critInfos.Add("[aqua]非训练回合[/]");
+            }
+            if (@event.data.chara_info.skill_point > 9500)
+            {
+                critInfos.Add("[red]剩余PT>9500（上限9999），请及时学习技能");
             }
             layout["重要信息"].Update(new Panel(string.Join(Environment.NewLine, critInfos)).Expand());
 
