@@ -87,16 +87,64 @@ namespace OnsenScenarioAnalyzer
         /// </summary>
         /// <param name="turn">当前回合信息</param>
         /// <param name="stratumType">地层类型（1=砂质, 2=土质, 3=岩石）</param>
+        /// <param name="showDebug">是否显示调试信息</param>
         /// <returns>Link 加成百分比（0 或 10）</returns>
-        private static int GetLinkBonus(TurnInfo turn, int stratumType)
+        private static int GetLinkBonus(TurnInfo turn, int stratumType, bool showDebug = false)
         {
-            return stratumType switch
+            var stratumTypeName = stratumType switch
             {
-                1 => HasLinkCharacterOrCard(turn, TOKAI_TEIO_CHARA_IDS) ? 10 : 0,  // 砂质 - 东海帝王
-                2 => (HasLinkCharacterOrCard(turn, CHUANG_SHENG_CHARA_IDS) || HasLinkCharacterOrCard(turn, MEJIRO_BOURBON_CHARA_IDS)) ? 10 : 0,  // 土质 - 创升或美浦波旁
-                3 => HasLinkCharacterOrCard(turn, KITASAN_BLACK_CHARA_IDS) ? 10 : 0,  // 岩石 - 奇锐骏
-                _ => 0
+                1 => "砂质",
+                2 => "土质",
+                3 => "岩石",
+                _ => "未知"
             };
+
+            int bonus = 0;
+            string linkCharacter = "";
+
+            switch (stratumType)
+            {
+                case 1:  // 砂质 - 东海帝王
+                    if (HasLinkCharacterOrCard(turn, TOKAI_TEIO_CHARA_IDS))
+                    {
+                        bonus = 10;
+                        linkCharacter = "东海帝王";
+                    }
+                    break;
+                case 2:  // 土质 - 创升或美浦波旁
+                    if (HasLinkCharacterOrCard(turn, CHUANG_SHENG_CHARA_IDS))
+                    {
+                        bonus = 10;
+                        linkCharacter = "创升";
+                    }
+                    else if (HasLinkCharacterOrCard(turn, MEJIRO_BOURBON_CHARA_IDS))
+                    {
+                        bonus = 10;
+                        linkCharacter = "美浦波旁";
+                    }
+                    break;
+                case 3:  // 岩石 - 奇锐骏
+                    if (HasLinkCharacterOrCard(turn, KITASAN_BLACK_CHARA_IDS))
+                    {
+                        bonus = 10;
+                        linkCharacter = "奇锐骏";
+                    }
+                    break;
+            }
+
+            if (showDebug)
+            {
+                if (bonus > 0)
+                {
+                    AnsiConsole.MarkupLine($"[green]✓ Link 触发[/]: {stratumTypeName}地层 - {linkCharacter} (+{bonus}%挖掘力)");
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine($"[grey]✗ Link 未触发[/]: {stratumTypeName}地层");
+                }
+            }
+
+            return bonus;
         }
 
         /// <summary>
@@ -140,20 +188,20 @@ namespace OnsenScenarioAnalyzer
         /// </summary>
         private static int GetStratumType(int stratumId)
         {
-            // 砂质: stratum_id = 4, 7, 9, 13, 15, 18
-            // 土质: stratum_id = 5, 8, 11, 14, 16, 19
-            // 岩石: stratum_id = 6, 10, 12, 17, 20
+            // 砂质: stratum_id = 4, 7, 9 , 15, 18
+            // 土质: stratum_id = 5, 8, 11, 13, 16, 19 
+            // 岩石: stratum_id = 6, 10, 12, 14, 17, 20
             return stratumId switch
             {
-                4 or 7 or 9 or 13 or 15 or 18 => 1,  // 砂质
-                5 or 8 or 11 or 14 or 16 or 19 => 2,  // 土质
-                6 or 10 or 12 or 17 or 20 => 3,  // 岩石
+                4 or 7 or 9 or 15 or 18 => 1,  // 砂质
+                5 or 8 or 11 or 13 or 16 or 19 => 2,  // 土质
+                6 or 10 or 12 or 17 or 14  or 20 => 3,  // 岩石
                 _ => 0
             };
         }
 
         /// <summary>
-        /// 获取当前温泉的挖掘力加成（直接从 dig_effect_info_array 获取，已包含所有加成）
+        /// 获取当前温泉的挖掘力加成（从 dig_effect_info_array 获取基础值，并加上 Link 加成）
         /// </summary>
         private static int GetDigPower(SingleModeOnsenDataSet dataset, int stratumId, TurnInfo turn)
         {
@@ -170,8 +218,13 @@ namespace OnsenScenarioAnalyzer
             if (index < 0 || index >= dataset.dig_effect_info_array.Length)
                 return 0;
 
-            // dig_effect_value 已经包含了所有加成（基础 + Link + 其他），直接使用
-            return dataset.dig_effect_info_array[index].dig_effect_value;
+            // dig_effect_value 是基础挖掘力（不包含 Link 加成）
+            var baseDigPower = dataset.dig_effect_info_array[index].dig_effect_value;
+
+            // 加上 Link 加成
+            var linkBonus = GetLinkBonus(turn, stratumType);
+
+            return baseDigPower + linkBonus;
         }
 
         /// <summary>
@@ -202,16 +255,31 @@ namespace OnsenScenarioAnalyzer
                 return 0;  // 所有地层都已挖完
 
             var firstLayer = currentOnsen.stratum_info_array[firstLayerIndex];
+            var stratumType = GetStratumType(firstLayer.stratum_id);
             var digPower = GetDigPower(dataset, firstLayer.stratum_id, turn);
+
+            // // 输出调试信息：Link 触发状态
+            // AnsiConsole.MarkupLine($"[cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/]");
+            // AnsiConsole.MarkupLine($"[yellow]挖掘计算调试信息[/]");
+            // AnsiConsole.MarkupLine($"  基础值: {baseValue} (25 + {supportCardCount}人头)");
+            // AnsiConsole.MarkupLine($"  当前地层: stratum_id={firstLayer.stratum_id}, 类型={GetStratumTypeName(stratumType)}, 剩余={firstLayer.rest_volume}");
+            // AnsiConsole.MarkupLine($"  挖掘力: {digPower}%");
+
+            // // 检查 Link 触发
+            // GetLinkBonus(turn, stratumType, showDebug: true);
 
             // 挖掘量 = floor(基础值 * ((100 + 挖掘力) / 100))
             var digAmount = (int)Math.Floor(baseValue * ((100 + digPower) / 100.0));
+            // AnsiConsole.MarkupLine($"  第一层挖掘量: floor({baseValue} × {100 + digPower}%) = {digAmount}");
 
             // 如果会跨地层，需要计算第二层的挖掘量
             if (digAmount > firstLayer.rest_volume)
             {
-                // 第一层所需基础值 = floor(第一层剩余 / (100 + 第一层挖掘力) * 100)
-                var firstLayerNeededBase = (int)Math.Floor(firstLayer.rest_volume / ((100 + digPower) / 100.0));
+                // AnsiConsole.MarkupLine($"[magenta]  跨地层挖掘[/]");
+
+                // 第一层所需基础值 = ceil(第一层剩余 / (100 + 第一层挖掘力) * 100)
+                var firstLayerNeededBase = (int)Math.Ceiling(firstLayer.rest_volume / ((100 + digPower) / 100.0));
+                // AnsiConsole.MarkupLine($"    第一层所需基础值: ceil({firstLayer.rest_volume} / {100 + digPower}% × 100) = {firstLayerNeededBase}");
 
                 // 找到下一层（从当前层的下一个索引开始找第一个 rest_volume > 0 的地层）
                 for (var i = firstLayerIndex + 1; i < currentOnsen.stratum_info_array.Length; i++)
@@ -219,16 +287,43 @@ namespace OnsenScenarioAnalyzer
                     var nextLayer = currentOnsen.stratum_info_array[i];
                     if (nextLayer.rest_volume > 0)
                     {
-                        // 第二层挖掘量 = floor((基础值 - 第一层所需基础值) * (100 + 第二层挖掘力) / 100)
+                        var nextStratumType = GetStratumType(nextLayer.stratum_id);
                         var secondDigPower = GetDigPower(dataset, nextLayer.stratum_id, turn);
+
+                        // AnsiConsole.MarkupLine($"    第二层: stratum_id={nextLayer.stratum_id}, 类型={GetStratumTypeName(nextStratumType)}, 挖掘力={secondDigPower}%");
+
+                        // 检查第二层 Link 触发
+                        GetLinkBonus(turn, nextStratumType, showDebug: true);
+
+                        // 第二层挖掘量 = floor((基础值 - 第一层所需基础值) * (100 + 第二层挖掘力) / 100)
                         var secondLayerDig = (int)Math.Floor((baseValue - firstLayerNeededBase) * ((100 + secondDigPower) / 100.0));
+                        // AnsiConsole.MarkupLine($"    第二层挖掘量: floor(({baseValue} - {firstLayerNeededBase}) × {100 + secondDigPower}%) = {secondLayerDig}");
+
                         digAmount = firstLayer.rest_volume + secondLayerDig;
+                        // AnsiConsole.MarkupLine($"    总挖掘量: {firstLayer.rest_volume} + {secondLayerDig} = {digAmount}");
                         break;  // 只计算到下一层，不继续往下
                     }
                 }
             }
 
+            // AnsiConsole.MarkupLine($"[green]  最终挖掘量: {digAmount}[/]");
+            // AnsiConsole.MarkupLine($"[cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/]");
+
             return digAmount;
+        }
+
+        /// <summary>
+        /// 获取地层类型名称
+        /// </summary>
+        private static string GetStratumTypeName(int stratumType)
+        {
+            return stratumType switch
+            {
+                1 => "砂质",
+                2 => "土质",
+                3 => "岩石",
+                _ => "未知"
+            };
         }
 
         /// <summary>
@@ -425,7 +520,7 @@ namespace OnsenScenarioAnalyzer
                     {
                         AnsiConsole.MarkupLine("[magenta]触发超回复[/]");
                         EventLogger.vitalSpent = 0;
-                    }                    
+                    }
                 }
                 if (lastBathing.onsen_effect_remain_count == 0 && bathing.onsen_effect_remain_count == 2)
                 {
