@@ -1,11 +1,13 @@
 ﻿using EventLoggerPlugin;
 using Gallop;
 using Spectre.Console;
+using Spectre.Console.Rendering;
 using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using UmamusumeResponseAnalyzer.Game.TurnInfo;
 using UmamusumeResponseAnalyzer.LocalizedLayout.Handlers;
@@ -36,6 +38,15 @@ namespace OnsenScenarioAnalyzer
                 return 0;
             }
         }
+
+        // 当前生效的温泉buff是否为超回复
+        public static bool isCurrentBuffSuper = false;
+        // 上次的温泉buff情况
+        public static SingleModeOnsenBathingInfo lastBathing = new();
+        // 上次的事件数量
+        public static int lastEventCount = 0;
+        // 给超回复的事件ID
+        public static int[] superEvents = { 809050011, 809050012, 809050013, 809050014, 809050015 };
         public static void ParseOnsenCommandInfo(SingleModeCheckEventResponse @event)
         {
             var stage = GetCommandInfoStage_legend(@event);
@@ -52,7 +63,8 @@ namespace OnsenScenarioAnalyzer
                     new Layout("剧本信息").SplitColumns(
                         new Layout("温泉券").Ratio(1),
                         new Layout("温泉Buff").Ratio(1),
-                        new Layout("挖掘进度").Ratio(2)
+                        new Layout("超回复").Ratio(1),
+                        new Layout("挖掘进度").Ratio(1)
                         ).Size(3),
                     //new Layout("分割", new Rule()).Size(1),
                     new Layout("训练信息")  // size 20, 共约30行
@@ -72,13 +84,89 @@ namespace OnsenScenarioAnalyzer
                 GameStats.isFullGame = false;
                 critInfos.Add(string.Format(I18N_WrongTurnAlert, GameStats.currentTurn, turn.Turn));
                 EventLogger.Init(@event);
+                EventLogger.IsStart = true;
+                isCurrentBuffSuper = false;
+                lastEventCount = 0;
+                // 初始化时根据温泉buff状态设置是否记录体力消耗
+                if (turn.Turn <= 2 || turn.Turn > 72)
+                {
+                    EventLogger.captureVitalSpending = false;
+                }
+                else
+                {
+                    EventLogger.captureVitalSpending = true;
+                }
             }
             else if (turn.Turn == 1)
             {
                 GameStats.isFullGame = true;
                 EventLogger.Init(@event);
+                EventLogger.IsStart = true;
+                isCurrentBuffSuper = false;
+                lastEventCount = 0;
             }
 
+            // 统计上回合事件
+            var lastEvents = EventLogger.AllEvents
+                    .Skip(lastEventCount)
+                    .Select(x => x.StoryId)
+                    .ToList();
+            lastEventCount = EventLogger.AllEvents.Count;
+            // 统计温泉Buff情况
+            var bathing = dataset.bathing_info;
+            if (bathing != null)
+            {
+                // 更新跟踪状态
+                if (lastBathing.superior_state == 0 && bathing.superior_state > 0)
+                {
+                    EventLogger.captureVitalSpending = false;
+                    if (lastEvents.Any(x => superEvents.Contains(x)))
+                    {
+                        AnsiConsole.MarkupLine("[magenta]友人提供超回复[/]");
+                    }
+                    else
+                    {
+                        AnsiConsole.MarkupLine("[magenta]触发超回复[/]");
+                        EventLogger.vitalSpent = 0;
+                    }                    
+                }
+                if (lastBathing.onsen_effect_remain_count == 0 && bathing.onsen_effect_remain_count == 2)
+                {
+                    AnsiConsole.MarkupLine("[magenta]使用温泉Buff[/]");
+                    if (lastBathing.superior_state > 0) isCurrentBuffSuper = true;
+                }
+                if (isCurrentBuffSuper && bathing.onsen_effect_remain_count == 0 && bathing.superior_state == 0)
+                {
+                    AnsiConsole.MarkupLine("[magenta]超回复Buff结束，开始记录体力消耗[/]");
+                    isCurrentBuffSuper = false;
+                    EventLogger.captureVitalSpending = true;
+                }
+                lastBathing = bathing;
+
+                // 显示当前状态
+                layout["温泉券"].Update(new Panel($"[cyan]温泉券: {bathing.ticket_num} / 3[/]").Expand());
+                if (bathing.onsen_effect_remain_count > 0)
+                {
+                    layout["温泉Buff"].Update(new Panel($"[lightgreen]温泉Buff剩余 {bathing.onsen_effect_remain_count} 回合[/]").Expand());
+                }
+                else
+                {
+                    layout["温泉Buff"].Update(new Panel($"温泉Buff未生效").Expand());
+                }
+                if (isCurrentBuffSuper) {
+                    layout["超回复"].Update(new Panel($"[lightgreen]超回复生效中[/]").Expand());
+                }
+                else if (bathing.superior_state > 0)
+                {
+                    layout["超回复"].Update(new Panel($"[green]必定超回复[/]").Expand());
+                }
+                else
+                {
+                    layout["超回复"].Update(new Panel($"[blue]累计体力消耗: {EventLogger.vitalSpent}[/]").Expand());
+                }
+
+            }
+            
             //买技能，大师杯剧本年末比赛，会重复显示
             if (@event.data.chara_info.playing_state != 1)
             {
@@ -91,6 +179,11 @@ namespace OnsenScenarioAnalyzer
                 GameStats.currentTurn = turn.Turn;
                 GameStats.stats[turn.Turn] = new TurnStats();
                 EventLogger.Update(@event);
+            }
+            // T3 在EventLogger更新后需要开始捕获体力消耗
+            if (turn.Turn == 3)
+            {
+                EventLogger.captureVitalSpending = true;
             }
             var trainItems = new Dictionary<int, SingleModeCommandInfo>
             {
@@ -337,23 +430,6 @@ namespace OnsenScenarioAnalyzer
                 noTrainingTable = true;
             }
 
-            // 剧本信息
-            var bathing = dataset.bathing_info;
-            if (bathing != null)
-            {
-                layout["温泉券"].Update(new Panel($"[cyan]温泉券: {bathing.ticket_num} / 3[/]").Expand());
-                if (bathing.onsen_effect_remain_count > 0) {
-                    if (bathing.superior_state > 0) {
-                        layout["温泉Buff"].Update(new Panel($"[lightgreen]超回复-剩余 {bathing.onsen_effect_remain_count} 回合[/]").Expand());
-                    } else
-                    {
-                        layout["温泉Buff"].Update(new Panel($"[green]普通-剩余 {bathing.onsen_effect_remain_count} 回合[/]").Expand());
-                    }
-                } else
-                {
-                    layout["温泉Buff"].Update(new Panel("[yellow]温泉Buff未生效[/]").Expand());
-                }
-            }
             // 计算挖掘进度
             var onsen_info = dataset.onsen_info_array.First(x => x.state == 2);
             if (onsen_info != null) {
@@ -378,6 +454,11 @@ namespace OnsenScenarioAnalyzer
                     string[] toolNames = { "砂", "土", "岩" };
                     exTable.AddRow(new Markup($"{toolNames[i]} Lv {value.item_level} +{value.dig_effect_value}%"));
                 }
+            }
+            // 体力消耗（测试）
+            if (EventLogger.vitalSpent > 0)
+            {
+                exTable.AddRow(new Markup($"[blue]累计体力消耗: {EventLogger.vitalSpent}[/]"));
             }
             // 计算连续事件表现
             var eventPerf = EventLogger.PrintCardEventPerf(@event.data.chara_info.scenario_id);
