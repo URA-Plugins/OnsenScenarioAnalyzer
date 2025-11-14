@@ -520,7 +520,7 @@ namespace OnsenScenarioAnalyzer
                     {
                         AnsiConsole.MarkupLine("[magenta]触发超回复[/]");
                         EventLogger.vitalSpent = 0;
-                    }
+                    }                    
                 }
                 if (lastBathing.onsen_effect_remain_count == 0 && bathing.onsen_effect_remain_count == 2)
                 {
@@ -778,7 +778,7 @@ namespace OnsenScenarioAnalyzer
                         _ => $"{I18N_Vital}:[green]{afterVital}[/]/{turn.MaxVital}"
                     });
 
-                    // KULAN 的挖掘显示（暂时保留）
+                    // 不同训练挖掘量
                     var gain = 0;
                     if (dataset != null && command.TrainIndex > 0 &&
                         dataset.command_info_array.Length > command.TrainLevel - 1)

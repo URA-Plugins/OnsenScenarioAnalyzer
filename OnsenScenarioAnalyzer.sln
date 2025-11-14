@@ -5,7 +5,7 @@ VisualStudioVersion = 17.14.36616.10
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OnsenScenarioAnalyzer", "OnsenScenarioAnalyzer.csproj", "{DAEA59FC-5EBC-C33A-2958-BAD4A3E28D0B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UmamusumeResponseAnalyzer", "..\URAFORK\UmamusumeResponseAnalyzer\UmamusumeResponseAnalyzer\UmamusumeResponseAnalyzer.csproj", "{40B1B873-870E-6870-6ADD-DDF30AEED0BA}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UmamusumeResponseAnalyzer", "..\..\UmaAIConnector\UmamusumeResponseAnalyzer\UmamusumeResponseAnalyzer.csproj", "{40B1B873-870E-6870-6ADD-DDF30AEED0BA}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EventLoggerPlugin", "..\EventLoggerPlugin\EventLoggerPlugin.csproj", "{16AD65E1-CF72-765E-BAAA-7EB7B684F577}"
 EndProject
