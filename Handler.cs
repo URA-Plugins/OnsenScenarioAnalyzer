@@ -33,7 +33,7 @@ namespace OnsenScenarioAnalyzer
         // 友人角色ID
         private static readonly int FRIEND_CHARA_ID = 9050;
         // 超回复概率
-        private static readonly int[] SUPER_PROBS = [0, 10, 20, 30, 40, 100];
+        private static readonly int[] SUPER_PROBS = [0, 10, 20, 30, 50, 80, 100];
 
         public static int GetCommandInfoStage_legend(SingleModeCheckEventResponse @event)
         {
@@ -434,20 +434,12 @@ namespace OnsenScenarioAnalyzer
             return 0;
         }
 
-        public static double CalculateSuperProb(TurnInfo turn, int vital)
+        public static int CalculateSuperProb(TurnInfo turn, int vital)
         {
-            var threshold = 42.5;
-            if (GetFriendRarity(turn) == 0) threshold = 50.0;
-            var old_rank = (int)Math.Max(Math.Min(Math.Floor((double)EventLogger.vitalSpent / threshold), 5), 0);
-            var new_rank = (int)Math.Max(Math.Min(Math.Floor((double)(EventLogger.vitalSpent + vital) / threshold), 5), 0);
-            if (new_rank > old_rank)
-            {
-                return (double)SUPER_PROBS[new_rank] / 100.0;
-            }
-            else
-            {
-                return (double)SUPER_PROBS[new_rank] / 400.0;
-            }
+            var threshold = 50.0;
+            //var old_rank = (int)Math.Max(Math.Min(Math.Floor((double)EventLogger.vitalSpent / threshold), 5), 0);
+            var new_rank = (int)Math.Max(Math.Min(Math.Floor((double)(EventLogger.vitalSpent + vital) / threshold), 6), 0);
+            return SUPER_PROBS[new_rank];
         }
 
         public static void SaveSuperResult(TurnInfo turn, int lastVital, int currentVital)
@@ -808,7 +800,7 @@ namespace OnsenScenarioAnalyzer
 
                     var afterVital = trainStats[command.TrainIndex - 1].VitalGain + turn.Vital;
                     // 计算不对，调整中
-                   // var superProb = bathing.superior_state > 0 ? 0 : CalculateSuperProb(turn, -trainStats[command.TrainIndex - 1].VitalGain);
+                    var superProb = bathing.superior_state > 0 ? 0 : CalculateSuperProb(turn, -trainStats[command.TrainIndex - 1].VitalGain);
                     table.AddRow(afterVital switch
                     {
                         < 30 => $"{I18N_Vital}:[red]{afterVital}[/]/{turn.MaxVital}",
@@ -840,10 +832,10 @@ namespace OnsenScenarioAnalyzer
                     // 显示挖掘信息
                     table.AddRow($"Lv{command.TrainLevel} | 挖: {gain}");
                     table.AddRow($"计算值: {calculatedDigAmount}");
-                   // if (superProb > 0)
-                   // {
-                   //     table.AddRow($"超回复: {Math.Round(superProb * 1000) / 10}%");
-                   // }
+                    if (superProb > 0)
+                    {
+                        table.AddRow($"超回复: {superProb}%");
+                    }
                     table.AddRow(new Rule());
 
                     var stats = trainStats[command.TrainIndex - 1];
