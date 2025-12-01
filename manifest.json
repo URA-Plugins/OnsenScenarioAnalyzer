@@ -1,5 +1,5 @@
 {
-  "Author": "离披",
+  "Author": "xulai1001",
   "InternalName": "OnsenScenarioAnalyzer",
   "Name": "解析温泉杯回合信息",
   "Description": "解析温泉杯回合信息",
@@ -9,5 +9,5 @@
   "Targets": [],
   "RepositoryUrl": "https://github.com/URA-Plugins/OnsenScenarioAnalyzer",
   "DownloadUrl": "https://gh.shuise.dev/github.com/URA-Plugins/OnsenScenarioAnalyzer/releases/latest/download/OnsenScenarioAnalyzer.zip",
-  "LastUpdate": "1751719983"
+  "LastUpdate": "1764548142"
 }
