@@ -4,10 +4,10 @@
   "Name": "解析温泉杯回合信息",
   "Description": "解析温泉杯回合信息",
   "Changelog": "",
-  "Version": "1.0.0",
+  "Version": "1.0.1",
   "Dependencies": [],
   "Targets": [],
   "RepositoryUrl": "https://github.com/URA-Plugins/OnsenScenarioAnalyzer",
   "DownloadUrl": "https://gh.shuise.dev/github.com/URA-Plugins/OnsenScenarioAnalyzer/releases/latest/download/OnsenScenarioAnalyzer.zip",
-  "LastUpdate": "1764548142"
+  "LastUpdate": "1767101085"
 }
