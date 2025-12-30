@@ -5,6 +5,7 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<RunPostBuildEvent>Always</RunPostBuildEvent>
+		<Version>1.0.1</Version>
 	</PropertyGroup>
 
 	<ItemGroup>

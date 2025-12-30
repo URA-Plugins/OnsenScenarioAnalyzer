@@ -445,13 +445,11 @@ namespace OnsenScenarioAnalyzer
         public static void SaveSuperResult(TurnInfo turn, int lastVital, int currentVital)
         {
             var line = $"{turn.Turn}, {GetFriendRarity(turn)}, {lastVital}, {currentVital}\n";
-            var path = Path.Combine([
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "UmamusumeResponseAnalyzer",
+            var path = Path.Combine(
                 "PluginData",
                 "OnsenScenarioAnalyzer",
                 "super.csv"
-            ]);
+            );
             File.AppendAllText(path, line);
         }
 
