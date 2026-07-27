@@ -1,24 +1,15 @@
 ﻿using EventLoggerPlugin;
 using Gallop;
-using Spectre.Console;
-using Spectre.Console.Rendering;
-using System;
-using System.Collections.Frozen;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Text.Json;
-using System.Threading.Tasks;
 using UmamusumeResponseAnalyzer;
-using UmamusumeResponseAnalyzer.Game;
-using UmamusumeResponseAnalyzer.Game.TurnInfo;
-using UmamusumeResponseAnalyzer.LocalizedLayout.Handlers;
+using UmamusumeResponseAnalyzer.TerminalGui;
 using static OnsenScenarioAnalyzer.i18n.Game;
 
 namespace OnsenScenarioAnalyzer
 {
-    public static class Handler
+    internal static class Handler
     {
+        public static string DataDirectory { get; set; } = Path.Combine("PluginData", "OnsenScenarioAnalyzer");
+
         // 理事长和记者的 Position ID
         private const int DIRECTOR_POSITION = 102;  // 理事长
         private const int REPORTER_POSITION = 103;  // 记者
@@ -35,7 +26,7 @@ namespace OnsenScenarioAnalyzer
         // 超回复概率
         private static readonly int[] SUPER_PROBS = [0, 10, 20, 30, 50, 80, 100];
 
-        public static int GetCommandInfoStage_legend(SingleModeCheckEventResponse @event)
+        public static int GetCommandInfoStage_legend(SingleModeOnsenCheckEventResponse @event)
         {
             //if ((@event.data.unchecked_event_array != null && @event.data.unchecked_event_array.Length > 0)) return;
             if (@event.data.chara_info.playing_state == 1 && (@event.data.unchecked_event_array == null || @event.data.unchecked_event_array.Length == 0))
@@ -76,7 +67,7 @@ namespace OnsenScenarioAnalyzer
             foreach (var supportCardId in turn.SupportCards.Values)
             {
                 // 将支援卡 ID 转换为角色 ID
-                var charaId = Database.Names.GetSupportCard(supportCardId).CharaId;
+                var charaId = Database.Names.GetRequiredSupportCard(supportCardId).CharaId;
                 if (linkCharaIds.Contains(charaId))
                     return true;
             }
@@ -89,20 +80,10 @@ namespace OnsenScenarioAnalyzer
         /// </summary>
         /// <param name="turn">当前回合信息</param>
         /// <param name="stratumType">地层类型（1=砂质, 2=土质, 3=岩石）</param>
-        /// <param name="showDebug">是否显示调试信息</param>
         /// <returns>Link 加成百分比（0 或 10）</returns>
-        private static int GetLinkBonus(TurnInfo turn, int stratumType, bool showDebug = false)
+        private static int GetLinkBonus(TurnInfo turn, int stratumType)
         {
-            var stratumTypeName = stratumType switch
-            {
-                1 => "砂",
-                2 => "土",
-                3 => "岩",
-                _ => "未知"
-            };
-
             int bonus = 0;
-            //string linkCharacter = "";
 
             switch (stratumType)
             {
@@ -125,26 +106,13 @@ namespace OnsenScenarioAnalyzer
                     }
                     break;
             }
-            /*
-            if (showDebug)
-            {
-                if (bonus > 0)
-                {
-                    AnsiConsole.MarkupLine($"[green]✓ Link 触发[/]: {stratumTypeName}地层 - {linkCharacter} (+{bonus}%挖掘力)");
-                }
-                else
-                {
-                    AnsiConsole.MarkupLine($"[grey]✗ Link 未触发[/]: {stratumTypeName}地层");
-                }
-            }
-            */
             return bonus;
         }
 
         /// <summary>
         /// 获取当前正在挖掘的温泉信息
         /// </summary>
-        private static (int remainingLayers, int totalLayers, int currentRestVolume) GetCurrentOnsenDigInfo(SingleModeOnsenDataSet dataset)
+        private static (int remainingLayers, int totalLayers, int currentRestVolume) GetCurrentOnsenDigInfo(SingleModeOnsenDataSet? dataset)
         {
             if (dataset?.onsen_info_array == null)
                 return (0, 0, 0);
@@ -177,6 +145,9 @@ namespace OnsenScenarioAnalyzer
             );
         }
 
+        private static int[] FiveValueGain(TrainStats stats) =>
+            stats.FiveValueGain ?? throw new InvalidDataException("TrainStats 缺少 FiveValueGain。");
+
         /// <summary>
         /// 根据地层ID获取地层类型
         /// </summary>
@@ -197,7 +168,7 @@ namespace OnsenScenarioAnalyzer
         /// <summary>
         /// 获取当前温泉的挖掘力加成（从 dig_effect_info_array 获取基础值，并加上 Link 加成）
         /// </summary>
-        private static int GetDigPower(SingleModeOnsenDataSet dataset, int stratumId, TurnInfo turn)
+        private static int GetDigPower(SingleModeOnsenDataSet? dataset, int stratumId, TurnInfo turn)
         {
             if (dataset?.dig_effect_info_array == null || dataset.dig_effect_info_array.Length < 3)
                 return 0;
@@ -224,7 +195,7 @@ namespace OnsenScenarioAnalyzer
         /// <summary>
         /// 计算训练的挖掘量（包含 link 加成和跨地层计算）
         /// </summary>
-        private static int CalculateDigAmount(int supportCardCount, SingleModeOnsenDataSet dataset, TurnInfo turn)
+        private static int CalculateDigAmount(int supportCardCount, SingleModeOnsenDataSet? dataset, TurnInfo turn)
         {
             // 基础值 = 25 + 支援卡人头数
             var baseValue = 25 + supportCardCount;
@@ -249,31 +220,16 @@ namespace OnsenScenarioAnalyzer
                 return 0;  // 所有地层都已挖完
 
             var firstLayer = currentOnsen.stratum_info_array[firstLayerIndex];
-            var stratumType = GetStratumType(firstLayer.stratum_id);
             var digPower = GetDigPower(dataset, firstLayer.stratum_id, turn);
-
-            // // 输出调试信息：Link 触发状态
-            // AnsiConsole.MarkupLine($"[cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/]");
-            // AnsiConsole.MarkupLine($"[yellow]挖掘计算调试信息[/]");
-            // AnsiConsole.MarkupLine($"  基础值: {baseValue} (25 + {supportCardCount}人头)");
-            // AnsiConsole.MarkupLine($"  当前地层: stratum_id={firstLayer.stratum_id}, 类型={GetStratumTypeName(stratumType)}, 剩余={firstLayer.rest_volume}");
-            // AnsiConsole.MarkupLine($"  挖掘力: {digPower}%");
-
-            // // 检查 Link 触发
-            // GetLinkBonus(turn, stratumType, showDebug: true);
 
             // 挖掘量 = floor(基础值 * ((100 + 挖掘力) / 100))
             var digAmount = (int)Math.Floor(baseValue * ((100 + digPower) / 100.0));
-            // AnsiConsole.MarkupLine($"  第一层挖掘量: floor({baseValue} × {100 + digPower}%) = {digAmount}");
 
             // 如果会跨地层，需要计算第二层的挖掘量
             if (digAmount > firstLayer.rest_volume)
             {
-                // AnsiConsole.MarkupLine($"[magenta]  跨地层挖掘[/]");
-
                 // 第一层所需基础值 = ceil(第一层剩余 / (100 + 第一层挖掘力) * 100)
                 var firstLayerNeededBase = (int)Math.Ceiling(firstLayer.rest_volume / ((100 + digPower) / 100.0));
-                // AnsiConsole.MarkupLine($"    第一层所需基础值: ceil({firstLayer.rest_volume} / {100 + digPower}% × 100) = {firstLayerNeededBase}");
 
                 // 找到下一层（从当前层的下一个索引开始找第一个 rest_volume > 0 的地层）
                 for (var i = firstLayerIndex + 1; i < currentOnsen.stratum_info_array.Length; i++)
@@ -281,43 +237,18 @@ namespace OnsenScenarioAnalyzer
                     var nextLayer = currentOnsen.stratum_info_array[i];
                     if (nextLayer.rest_volume > 0)
                     {
-                        var nextStratumType = GetStratumType(nextLayer.stratum_id);
                         var secondDigPower = GetDigPower(dataset, nextLayer.stratum_id, turn);
-
-                        // AnsiConsole.MarkupLine($"    第二层: stratum_id={nextLayer.stratum_id}, 类型={GetStratumTypeName(nextStratumType)}, 挖掘力={secondDigPower}%");
-
-                        // 检查第二层 Link 触发
-                        GetLinkBonus(turn, nextStratumType, showDebug: true);
 
                         // 第二层挖掘量 = floor((基础值 - 第一层所需基础值) * (100 + 第二层挖掘力) / 100)
                         var secondLayerDig = (int)Math.Floor((baseValue - firstLayerNeededBase) * ((100 + secondDigPower) / 100.0));
-                        // AnsiConsole.MarkupLine($"    第二层挖掘量: floor(({baseValue} - {firstLayerNeededBase}) × {100 + secondDigPower}%) = {secondLayerDig}");
 
                         digAmount = firstLayer.rest_volume + secondLayerDig;
-                        // AnsiConsole.MarkupLine($"    总挖掘量: {firstLayer.rest_volume} + {secondLayerDig} = {digAmount}");
                         break;  // 只计算到下一层，不继续往下
                     }
                 }
             }
 
-            // AnsiConsole.MarkupLine($"[green]  最终挖掘量: {digAmount}[/]");
-            // AnsiConsole.MarkupLine($"[cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/]");
-
             return digAmount;
-        }
-
-        /// <summary>
-        /// 获取地层类型名称
-        /// </summary>
-        private static string GetStratumTypeName(int stratumType)
-        {
-            return stratumType switch
-            {
-                1 => "砂质",
-                2 => "土质",
-                3 => "岩石",
-                _ => "未知"
-            };
         }
 
         /// <summary>
@@ -326,7 +257,7 @@ namespace OnsenScenarioAnalyzer
         /// <param name="dataset">温泉数据集</param>
         /// <param name="turn">当前回合信息</param>
         /// <returns>加权平均挖掘力（百分比），如果无法计算返回 0</returns>
-        private static int CalculateWeightedDigPower(SingleModeOnsenDataSet dataset, TurnInfo turn)
+        private static int CalculateWeightedDigPower(SingleModeOnsenDataSet? dataset, TurnInfo turn)
         {
             var currentOnsen = dataset?.onsen_info_array?.FirstOrDefault(x => x.state == 2);
             if (currentOnsen == null || currentOnsen.stratum_info_array == null)
@@ -382,7 +313,7 @@ namespace OnsenScenarioAnalyzer
         /// <param name="trainingRate">假设的训练频率（默认 0.75，即 75%）</param>
         /// <returns>预计完成回合数，如果已完成返回 0，如果无法计算返回 -1</returns>
         private static int PredictRemainingTurns(
-            SingleModeOnsenDataSet dataset,
+            SingleModeOnsenDataSet? dataset,
             TurnInfo turn,
             int assumedSupportCardCount = 2,
             float trainingRate = 0.75f)
@@ -427,29 +358,27 @@ namespace OnsenScenarioAnalyzer
         {
             foreach (var supportCardId in turn.SupportCards.Values)
             {
-                var charaId = Database.Names.GetSupportCard(supportCardId).CharaId;
+                var charaId = Database.Names.GetRequiredSupportCard(supportCardId).CharaId;
                 var rarity = supportCardId / 10000;
                 if (charaId == FRIEND_CHARA_ID) return rarity;
             }
             return 0;
         }
 
-        public static int CalculateSuperProb(TurnInfo turn, int vital)
+        static int CalculateSuperProb(int vitalSpent, int vital)
         {
             var threshold = 50.0;
-            //var old_rank = (int)Math.Max(Math.Min(Math.Floor((double)EventLogger.vitalSpent / threshold), 5), 0);
-            var new_rank = (int)Math.Max(Math.Min(Math.Floor((double)(EventLogger.vitalSpent + vital) / threshold), 6), 0);
+            var new_rank = (int)Math.Max(Math.Min(
+                Math.Floor((double)(vitalSpent + vital) / threshold),
+                6), 0);
             return SUPER_PROBS[new_rank];
         }
 
         public static void SaveSuperResult(TurnInfo turn, int lastVital, int currentVital)
         {
             var line = $"{turn.Turn}, {GetFriendRarity(turn)}, {lastVital}, {currentVital}\n";
-            var path = Path.Combine(
-                "PluginData",
-                "OnsenScenarioAnalyzer",
-                "super.csv"
-            );
+            Directory.CreateDirectory(DataDirectory);
+            var path = Path.Combine(DataDirectory, "super.csv");
             File.AppendAllText(path, line);
         }
 
@@ -463,128 +392,95 @@ namespace OnsenScenarioAnalyzer
         public static int lastVitalSpent = 0;
         // 给超回复的事件ID
         public static int[] superEvents = { 809050011, 809050012, 809050013, 809050014, 809050015 };
-        public static void ParseOnsenCommandInfo(SingleModeCheckEventResponse @event)
+        public static WorkspaceContent ParseOnsenCommandInfo(SingleModeOnsenCheckEventResponse @event)
         {
             var stage = GetCommandInfoStage_legend(@event);
             if (stage == 0)
-                return;
-            var layout = new Layout().SplitColumns(
-                new Layout("Main").Size(CommandInfoLayout.Current.MainSectionWidth).SplitRows(
-                    new Layout("体力干劲条").SplitColumns(
-                        new Layout("日期").Ratio(4),
-                        new Layout("总属性").Ratio(6),
-                        new Layout("体力").Ratio(6),
-                        new Layout("干劲").Ratio(3)).Size(3),
-                    new Layout("重要信息").Size(5),
-                    new Layout("剧本信息").SplitColumns(
-                        new Layout("温泉券").Ratio(1),
-                        new Layout("温泉Buff").Ratio(1),
-                        new Layout("超回复").Ratio(1),
-                        new Layout("挖掘进度").Ratio(1)
-                        ).Size(3),
-                    //new Layout("分割", new Rule()).Size(1),
-                    new Layout("训练信息")  // size 20, 共约30行
-                    ).Ratio(4),
-                new Layout("Ext").Ratio(1)
-                );
-            var noTrainingTable = false;
+                throw new InvalidOperationException("温泉训练面板只接受可显示的回合阶段。");
             var critInfos = new List<string>();
-            var turn = new TurnInfoOnsen(@event.data);
-            var dataset = @event.data.onsen_data_set;
+            var scenarioRows = new List<string>();
+            var trainingRows = new List<string>();
+            var extraRows = new List<string>();
+            var turn = new TurnInfoOnsen(SingleModeTurnData.From(@event.data));
+            var dataset = @event.data.onsen_data_set
+                ?? throw new InvalidDataException("SingleModeOnsen.CheckEvent 缺少 onsen_data_set。");
+            var eventLoggerSnapshot = new EventLoggerSnapshot(
+                @event.data.chara_info,
+                @event.data.unchecked_event_array,
+                @event.data.select_index_info_array);
+            var round = EventLogger.Current;
 
-            if (GameStats.currentTurn != turn.Turn - 1 //正常情况
-                && GameStats.currentTurn != turn.Turn //重复显示
+            if (round.CurrentTurn != turn.Turn - 1 //正常情况
+                && round.CurrentTurn != turn.Turn //重复显示
                 && turn.Turn != 1 //第一个回合
                 )
             {
-                GameStats.isFullGame = false;
-                critInfos.Add(string.Format(I18N_WrongTurnAlert, GameStats.currentTurn, turn.Turn));
-                EventLogger.Init(@event);
-                EventLogger.IsStart = true;
+                critInfos.Add(string.Format(I18N_WrongTurnAlert, round.CurrentTurn, turn.Turn));
                 isCurrentBuffSuper = false;
                 lastEventCount = 0;
-                // 初始化时根据温泉buff状态设置是否记录体力消耗
-                if (turn.Turn <= 2 || turn.Turn > 72)
-                {
-                    EventLogger.captureVitalSpending = false;
-                }
-                else
-                {
-                    EventLogger.captureVitalSpending = true;
-                }
+                EventLogger.ResetAndStartSession(
+                    eventLoggerSnapshot,
+                    isFullGame: false,
+                    captureVital: turn.Turn is > 2 and <= 72);
+                round = EventLogger.Current;
             }
             else if (turn.Turn == 1)
             {
-                GameStats.isFullGame = true;
-                EventLogger.Init(@event);
-                EventLogger.IsStart = true;
+                EventLogger.ResetAndStartSession(eventLoggerSnapshot, isFullGame: true);
+                round = EventLogger.Current;
                 isCurrentBuffSuper = false;
                 lastEventCount = 0;
                 lastVitalSpent = 0;
             }
 
             // 统计上回合事件
-            var lastEvents = EventLogger.AllEvents
+            var lastEvents = round.AllEvents
                     .Skip(lastEventCount)
                     .Select(x => x.StoryId)
                     .ToList();
-            lastEventCount = EventLogger.AllEvents.Count;
+            lastEventCount = round.AllEvents.Length;
             // 统计温泉Buff情况
-            var bathing = dataset.bathing_info;
-            if (bathing != null)
+            var bathing = dataset.bathing_info
+                ?? throw new InvalidDataException("SingleModeOnsen.CheckEvent 缺少 onsen_data_set.bathing_info。");
+            // 更新跟踪状态
+            if (lastBathing.superior_state == 0 && bathing.superior_state > 0)
             {
-                // 更新跟踪状态
-                if (lastBathing.superior_state == 0 && bathing.superior_state > 0)
+                if (lastEvents.Any(x => superEvents.Contains(x)))
                 {
-                    if (lastEvents.Any(x => superEvents.Contains(x)))
-                    {
-                        AnsiConsole.MarkupLine("[magenta]友人提供超回复[/]");
-                    }
-                    else
-                    {
-                        AnsiConsole.MarkupLine($"[magenta]触发超回复. 体力消耗: {lastVitalSpent} -> {EventLogger.vitalSpent}[/]");
-                        SaveSuperResult(turn, lastVitalSpent, EventLogger.vitalSpent);
-                    }
-                    // 无论怎么触发的超回复都重置体力计数
-                    EventLogger.captureVitalSpending = false;
-                    EventLogger.vitalSpent = 0;
-                }
-                if (lastBathing.onsen_effect_remain_count == 0 && bathing.onsen_effect_remain_count == 2)
-                {
-                    AnsiConsole.MarkupLine("[magenta]使用温泉Buff[/]");
-                    if (lastBathing.superior_state > 0)
-                    {
-                        isCurrentBuffSuper = true;
-                        EventLogger.captureVitalSpending = true;
-                    }
-                }
-                if (isCurrentBuffSuper && bathing.onsen_effect_remain_count == 0 && bathing.superior_state == 0)
-                {
-                    isCurrentBuffSuper = false;   
-                }
-                lastBathing = bathing;
-                lastVitalSpent = EventLogger.vitalSpent;
-
-                // 显示当前状态
-                layout["温泉券"].Update(new Panel($"[cyan]温泉券: {bathing.ticket_num} / 3[/]").Expand());
-                if (bathing.onsen_effect_remain_count > 0)
-                {
-                    layout["温泉Buff"].Update(new Panel($"[lightgreen]温泉Buff剩余 {bathing.onsen_effect_remain_count} 回合[/]").Expand());
+                    critInfos.Add("友人提供超回复");
                 }
                 else
                 {
-                    layout["温泉Buff"].Update(new Panel($"温泉Buff未生效").Expand());
+                    critInfos.Add($"触发超回复. 体力消耗: {lastVitalSpent} -> {round.VitalSpent}");
+                    SaveSuperResult(turn, lastVitalSpent, round.VitalSpent);
                 }
-                if (bathing.superior_state > 0)
-                {
-                    layout["超回复"].Update(new Panel($"[green]必定超回复[/]").Expand());
-                }
-                else
-                {
-                    layout["超回复"].Update(new Panel($"[blue]累计体力消耗: {EventLogger.vitalSpent}[/]").Expand());
-                }
-
+                // 无论怎么触发的超回复都重置体力计数
+                EventLogger.SetVitalCapture(enabled: false, reset: true);
+                round = EventLogger.Current;
             }
+            if (lastBathing.onsen_effect_remain_count == 0 && bathing.onsen_effect_remain_count == 2)
+            {
+                critInfos.Add("使用温泉Buff");
+                if (lastBathing.superior_state > 0)
+                {
+                    isCurrentBuffSuper = true;
+                    EventLogger.SetVitalCapture(enabled: true);
+                    round = EventLogger.Current;
+                }
+            }
+            if (isCurrentBuffSuper && bathing.onsen_effect_remain_count == 0 && bathing.superior_state == 0)
+                isCurrentBuffSuper = false;
+
+            lastBathing = bathing;
+            lastVitalSpent = round.VitalSpent;
+
+            scenarioRows.Add($"温泉券: {bathing.ticket_num} / 3");
+            scenarioRows.Add(bathing.onsen_effect_remain_count > 0
+                ? $"温泉Buff剩余 {bathing.onsen_effect_remain_count} 回合"
+                : "温泉Buff未生效");
+            scenarioRows.Add(bathing.superior_state > 0
+                ? "必定超回复"
+                : $"累计体力消耗: {round.VitalSpent}");
             
             //买技能，大师杯剧本年末比赛，会重复显示
             if (@event.data.chara_info.playing_state != 1)
@@ -593,16 +489,17 @@ namespace OnsenScenarioAnalyzer
             }
             else
             {
-                //初始化TurnStats
-                GameStats.whichScenario = @event.data.chara_info.scenario_id;
-                GameStats.currentTurn = turn.Turn;
-                GameStats.stats[turn.Turn] = new TurnStats();
-                EventLogger.Update(@event);
+                EventLogger.BeginScenarioTurn(
+                    eventLoggerSnapshot,
+                    @event.data.chara_info.scenario_id,
+                    turn.Turn);
+                round = EventLogger.Current;
             }
             // T3 在EventLogger更新后需要开始捕获体力消耗
             if (turn.Turn == 3)
             {
-                EventLogger.captureVitalSpending = true;
+                EventLogger.SetVitalCapture(enabled: true);
+                round = EventLogger.Current;
             }
             var trainItems = new Dictionary<int, SingleModeCommandInfo>
             {
@@ -613,7 +510,9 @@ namespace OnsenScenarioAnalyzer
                 { 106, @event.data.home_info.command_info_array[4] }
             };
             var trainStats = new TrainStats[5];
-            var turnStat = @event.data.chara_info.playing_state != 1 ? new TurnStats() : GameStats.stats[turn.Turn];
+            var turnStat = @event.data.chara_info.playing_state != 1
+                ? new TurnStats()
+                : round.NewTurnBuilder(turn.Turn);
             turnStat.motivation = @event.data.chara_info.motivation;
             var failureRate = new Dictionary<int, int>();
 
@@ -626,17 +525,8 @@ namespace OnsenScenarioAnalyzer
                 @event.data.chara_info.guts ,
                 @event.data.chara_info.wiz ,
             };
-            var fiveValueMaxRevised = new int[]
-            {
-                ScoreUtils.ReviseOver1200(@event.data.chara_info.max_speed),
-                ScoreUtils.ReviseOver1200(@event.data.chara_info.max_stamina),
-                ScoreUtils.ReviseOver1200(@event.data.chara_info.max_power) ,
-                ScoreUtils.ReviseOver1200(@event.data.chara_info.max_guts) ,
-                ScoreUtils.ReviseOver1200(@event.data.chara_info.max_wiz) ,
-            };
             var currentFiveValueRevised = currentFiveValue.Select(ScoreUtils.ReviseOver1200).ToArray();
             var totalValue = currentFiveValueRevised.Sum();
-            var totalValueWithPt = totalValue + @event.data.chara_info.skill_point;
 
             for (var i = 0; i < 5; i++)
             {
@@ -695,14 +585,15 @@ namespace OnsenScenarioAnalyzer
                 }
                 else
                 {
-                    var lastTrainLevel = GameStats.stats[turn.Turn - 1] != null ? GameStats.stats[turn.Turn - 1].trainLevel[i] : 1;
-                    var lastTrainLevelCount = GameStats.stats[turn.Turn - 1] != null ? GameStats.stats[turn.Turn - 1].trainLevelCount[i] : 0;
+                    var previousTurn = round.Turns[turn.Turn - 1];
+                    var lastTrainLevel = previousTurn?.TrainLevel[i] ?? 1;
+                    var lastTrainLevelCount = previousTurn?.TrainLevelCount[i] ?? 0;
 
                     turnStat.trainLevel[i] = lastTrainLevel;
                     turnStat.trainLevelCount[i] = lastTrainLevelCount;
-                    if (GameStats.stats[turn.Turn - 1] != null &&
-                        GameStats.stats[turn.Turn - 1].playerChoice == TurnInfoOnsen.TrainIds[i] &&
-                        !GameStats.stats[turn.Turn - 1].isTrainingFailed &&
+                    if (previousTurn is not null &&
+                        previousTurn.PlayerChoice == TurnInfoOnsen.TrainIds[i] &&
+                        !previousTurn.IsTrainingFailed &&
                         !((turn.Turn - 1 >= 37 && turn.Turn - 1 <= 40) || (turn.Turn - 1 >= 61 && turn.Turn - 1 <= 64))
                         )//上回合点的这个训练，计数+1
                         turnStat.trainLevelCount[i] += 1;
@@ -730,7 +621,7 @@ namespace OnsenScenarioAnalyzer
                     if (turnStat.trainLevel[i] != trainlv && stage == 2)
                     {
                         //可能是半途开启小黑板，也可能是有未知bug
-                        critInfos.Add($"[red]警告：训练等级预测错误，预测{TurnInfoOnsen.TrainIds[i]}为lv{turnStat.trainLevel[i]}(+{turnStat.trainLevelCount[i]})，实际为lv{trainlv}[/]");
+                        critInfos.Add($"警告：训练等级预测错误，预测{TurnInfoOnsen.TrainIds[i]}为lv{turnStat.trainLevel[i]}(+{turnStat.trainLevelCount[i]})，实际为lv{trainlv}");
                         turnStat.trainLevel[i] = trainlv;
                         turnStat.trainLevelCount[i] = 0;//如果是半途开启小黑板，则会在下一次升级时变成正确的计数
                     }
@@ -740,76 +631,49 @@ namespace OnsenScenarioAnalyzer
             }
             if (stage == 2)
             {
-                // 把训练等级信息更新到GameStats
                 turnStat.fiveTrainStats = trainStats;
-                GameStats.stats[turn.Turn] = turnStat;
+                EventLogger.CommitScenarioTurn(
+                    @event.data.chara_info.scenario_id,
+                    turn.Turn,
+                    turnStat);
+                round = EventLogger.Current;
             }
 
             //训练或比赛阶段
             if (stage == 2)
             {
-                var grids = new Grid();
-                grids.AddColumns(6);
-                foreach (var column in grids.Columns)
-                {
-                    column.Padding = new Padding(0, 0, 0, 0);
-                }
-
-                var failureRateStr = new string[5];
-                //失败率>=40%标红、>=20%(有可能大失败)标DarkOrange、>0%标黄
-                for (var i = 0; i < 5; i++)
-                {
-                    var thisFailureRate = failureRate[TurnInfoOnsen.TrainIds[i]];
-                    failureRateStr[i] = thisFailureRate switch
-                    {
-                        >= 40 => $"[red]({thisFailureRate}%)[/]",
-                        >= 20 => $"[darkorange]({thisFailureRate}%)[/]",
-                        > 0 => $"[yellow]({thisFailureRate}%)[/]",
-                        _ => string.Empty
-                    };
-                }
-
                 // 获取温泉挖掘信息（用于预测）
-                var (remainingLayers, totalLayers, currentRestVolume) = GetCurrentOnsenDigInfo(dataset);
+                var (remainingLayers, _, _) = GetCurrentOnsenDigInfo(dataset);
+                var hasSuperiorBathing = bathing.superior_state > 0;
 
-                var commands = turn.CommandInfoArray.Select(command =>
+                foreach (var command in turn.CommandInfoArray)
                 {
-                    var table = new Table()
-                    .AddColumn(command.TrainIndex switch
+                    var commandFailureRate = command.TrainIndex <= 5
+                        ? failureRate[TurnInfoOnsen.TrainIds[command.TrainIndex - 1]]
+                        : 0;
+                    var failureRateText = commandFailureRate > 0 ? $" ({commandFailureRate}%)" : string.Empty;
+                    var title = command.TrainIndex switch
                     {
-                        1 => $"{I18N_Speed}{failureRateStr[0]}",
-                        2 => $"{I18N_Stamina}{failureRateStr[1]}",
-                        3 => $"{I18N_Power}{failureRateStr[2]}",
-                        4 => $"{I18N_Nuts}{failureRateStr[3]}",
-                        5 => $"{I18N_Wiz}{failureRateStr[4]}",
-                        6 => $"PR活动"
-                    });
+                        1 => I18N_Speed,
+                        2 => I18N_Stamina,
+                        3 => I18N_Power,
+                        4 => I18N_Nuts,
+                        5 => I18N_Wiz,
+                        6 => "PR活动",
+                        _ => throw new InvalidDataException($"未知训练索引: {command.TrainIndex}")
+                    };
 
                     var currentStat = turn.StatsRevised[command.TrainIndex - 1];
                     var statUpToMax = turn.MaxStatsRevised[command.TrainIndex - 1] - currentStat;
-                    table.AddRow(I18N_CurrentRemainStat);
-                    table.AddRow($"{currentStat}:{statUpToMax switch
-                    {
-                        > 400 => $"{statUpToMax}",
-                        > 200 => $"[yellow]{statUpToMax}[/]",
-                        _ => $"[red]{statUpToMax}[/]"
-                    }}");
-                    table.AddRow(new Rule());
-
-                    var afterVital = trainStats[command.TrainIndex - 1].VitalGain + turn.Vital;
+                    var stats = trainStats[command.TrainIndex - 1]
+                        ?? throw new InvalidDataException($"训练 {command.TrainIndex} 缺少 TrainStats。");
+                    var afterVital = stats.VitalGain + turn.Vital;
                     // 计算不对，调整中
-                    var superProb = bathing.superior_state > 0 ? 0 : CalculateSuperProb(turn, -trainStats[command.TrainIndex - 1].VitalGain);
-                    table.AddRow(afterVital switch
-                    {
-                        < 30 => $"{I18N_Vital}:[red]{afterVital}[/]/{turn.MaxVital}",
-                        < 50 => $"{I18N_Vital}:[darkorange]{afterVital}[/]/{turn.MaxVital}",
-                        < 70 => $"{I18N_Vital}:[yellow]{afterVital}[/]/{turn.MaxVital}",
-                        _ => $"{I18N_Vital}:[green]{afterVital}[/]/{turn.MaxVital}"
-                    });
+                    var superProb = hasSuperiorBathing ? 0 : CalculateSuperProb(round.VitalSpent, -stats.VitalGain);
 
                     // 不同训练挖掘量
                     var gain = 0;
-                    if (dataset != null && command.TrainIndex > 0 &&
+                    if (command.TrainIndex > 0 &&
                         dataset.command_info_array.Length > command.TrainLevel - 1)
                     {
                         var dig_array = dataset.command_info_array[command.TrainIndex - 1].dig_info_array;
@@ -827,149 +691,114 @@ namespace OnsenScenarioAnalyzer
                         calculatedDigAmount = CalculateDigAmount(supportCardCount, dataset, turn);
                     }
 
-                    // 显示挖掘信息
-                    table.AddRow($"Lv{command.TrainLevel} | 挖: {gain}");
-                    table.AddRow($"计算值: {calculatedDigAmount}");
-                    if (superProb > 0)
-                    {
-                        table.AddRow($"超回复: {superProb}%");
-                    }
-                    table.AddRow(new Rule());
-
-                    var stats = trainStats[command.TrainIndex - 1];
-                    var score = stats.FiveValueGain.Sum();
-                    if (score == trainStats.Max(x => x.FiveValueGain.Sum()))
-                        table.AddRow($"{I18N_StatSimple}:[aqua]{score}[/]|Pt:{stats.PtGain}");
-                    else
-                        table.AddRow($"{I18N_StatSimple}:{score}|Pt:{stats.PtGain}");
-
-                    foreach (var trainingPartner in command.TrainingPartners)
-                    {
-                        table.AddRow(trainingPartner.Name);
-                        if (trainingPartner.Shining)
-                            table.BorderColor(Color.LightGreen);
-                    }
-                    for (var i = 5 - command.TrainingPartners.Count(); i > 0; i--)
-                    {
-                        table.AddRow(string.Empty);
-                    }
-                    table.AddRow(new Rule());
-
-                    return new Padder(table).Padding(0, 0, 0, 0);
-                }).ToList();
-                grids.AddRow([.. commands]);
-
-                layout["训练信息"].Update(grids);
+                    var score = FiveValueGain(stats).Sum();
+                    var isBestScore = score == trainStats.Max(x => FiveValueGain(x).Sum());
+                    var hasShiningPartner = command.TrainingPartners.Any(x => x.Shining);
+                    trainingRows.Add($"{(hasShiningPartner ? "★ " : string.Empty)}[{title}{failureRateText}]");
+                    trainingRows.Add($"  {I18N_CurrentRemainStat}: {currentStat}:{statUpToMax}");
+                    trainingRows.Add($"  {I18N_Vital}: {afterVital}/{turn.MaxVital}");
+                    trainingRows.Add($"  Lv{command.TrainLevel} | 挖: {gain} | 计算值: {calculatedDigAmount}"
+                        + (superProb > 0 ? $" | 超回复: {superProb}%" : string.Empty));
+                    trainingRows.Add($"  {(isBestScore ? "★ " : string.Empty)}{I18N_StatSimple}:{score} | Pt:{stats.PtGain}");
+                    trainingRows.AddRange(command.TrainingPartners.Select(x => $"  {x.Name}"));
+                    trainingRows.Add(string.Empty);
+                }
             }
             else
             {
-                var grids = new Grid();
-                grids.AddColumns(1);
-                grids.AddRow([$"非训练阶段，stage={stage}"]);
-                layout["训练信息"].Update(grids);
-                noTrainingTable = true;
+                trainingRows.Add($"非训练阶段，stage={stage}");
             }
 
             // 计算挖掘进度
-            var onsen_info = dataset.onsen_info_array.First(x => x.state == 2);
-            if (onsen_info != null) {
-                var rest = 0;
-                foreach (var layer in onsen_info.stratum_info_array)
-                {
-                    rest += layer.rest_volume;
-                }
-                layout["挖掘进度"].Update(new Panel($"挖掘进度剩余: {rest}").Expand());
-            }
+            var onsen_info = dataset.onsen_info_array.FirstOrDefault(x => x.state == 2);
+            if (onsen_info != null)
+                scenarioRows.Add($"挖掘进度剩余: {onsen_info.stratum_info_array.Sum(x => x.rest_volume)}");
 
             // 额外信息
-            var exTable = new Table().AddColumn("Extras");
-            exTable.HideHeaders();
             // 挖掘力
-            if (dataset != null && dataset.dig_effect_info_array.Length >= 3)
+            if (dataset.dig_effect_info_array.Length >= 3)
             {
-                exTable.AddRow(new Markup("挖掘力加成"));
+                extraRows.Add("挖掘力加成");
                 for (var i = 0; i < 3; i++)
                 {
                     var value = dataset.dig_effect_info_array[i];
                     string[] toolNames = { "砂", "土", "岩" };
-                    exTable.AddRow(new Markup($"{toolNames[i]} Lv {value.item_level} +{value.dig_effect_value}%"));
+                    extraRows.Add($"{toolNames[i]} Lv {value.item_level} +{value.dig_effect_value}%");
                 }
             }
             // 温泉挖掘完成预测
-            var onsen_info_predict = dataset.onsen_info_array.FirstOrDefault(x => x.state == 2);
+            var onsenInfoArray = dataset.onsen_info_array
+                ?? throw new InvalidDataException("SingleModeOnsen.CheckEvent 缺少 onsen_data_set.onsen_info_array。");
+            var onsen_info_predict = onsenInfoArray.FirstOrDefault(x => x.state == 2);
             if (onsen_info_predict != null)
             {
                 // 检查是否已进入 URA 阶段（第 72 回合及以后）
                 if (turn.Turn >= 72)
                 {
                     // URA 阶段不再显示预测，显示提示信息
-                    exTable.AddRow(new Markup("挖掘结束"));
+                    extraRows.Add("挖掘结束");
                 }
                 else
                 {
                     var predictedTurns = PredictRemainingTurns(dataset, turn) - 1;  // 多了一个回合 减去一下
                     if (predictedTurns > 0)
-                    {
-                        // 根据预测结果添加颜色标识
-                        var predictionMarkup = predictedTurns switch
-                        {
-                            <= 3 => $"[green]还需 {predictedTurns} 回合挖完[/]",  // 绿色（≤3回合）
-                            <= 6 => $"[yellow]还需 {predictedTurns} 回合挖完[/]",  // 黄色（4-6回合）
-                            <= 10 => $"[darkorange]还需 {predictedTurns} 回合挖完[/]",  // 橙色（7-10回合）
-                            _ => $"[red]还需 {predictedTurns} 回合挖完[/]"  // 红色（>10回合）
-                        };
-                        exTable.AddRow(new Markup(predictionMarkup));
-                    }
+                        extraRows.Add($"还需 {predictedTurns} 回合挖完");
                 }
             }
             // 体力消耗（测试）
-            if (EventLogger.vitalSpent > 0)
-            {
-                exTable.AddRow(new Markup($"[blue]累计体力消耗: {EventLogger.vitalSpent}[/]"));
-            }
-            // 计算连续事件表现
-            var eventPerf = EventLogger.PrintCardEventPerf(@event.data.chara_info.scenario_id);
-            if (eventPerf.Count > 0)
-            {
-                exTable.AddRow(new Rule());
-                foreach (var row in eventPerf)
-                    exTable.AddRow(new Markup(row));
-            }
+            if (round.VitalSpent > 0)
+                extraRows.Add($"累计体力消耗: {round.VitalSpent}");
 
-            layout["日期"].Update(new Panel($"{turn.Year}{I18N_Year} {turn.Month}{I18N_Month}{turn.HalfMonth}").Expand());
-            layout["总属性"].Update(new Panel($"[cyan]总属性: {totalValue}, Pt: {@event.data.chara_info.skill_point}[/]").Expand());
-            layout["体力"].Update(new Panel($"{I18N_Vital}: [green]{turn.Vital}[/]/{turn.MaxVital}").Expand());
-            layout["干劲"].Update(new Panel(@event.data.chara_info.motivation switch
+            // 计算连续事件表现
+            extraRows.AddRange(EventLogger.PrintCardEventPerf(@event.data.chara_info.scenario_id));
+
+            var motivation = @event.data.chara_info.motivation switch
             {
                 // 换行分裂和箭头符号有关，去掉
-                5 => $"[green]{I18N_MotivationBest}[/]",
-                4 => $"[yellow]{I18N_MotivationGood}[/]",
-                3 => $"[red]{I18N_MotivationNormal}[/]",
-                2 => $"[red]{I18N_MotivationBad}[/]",
-                1 => $"[red]{I18N_MotivationWorst}[/]"
-            }).Expand());
+                5 => I18N_MotivationBest,
+                4 => I18N_MotivationGood,
+                3 => I18N_MotivationNormal,
+                2 => I18N_MotivationBad,
+                1 => I18N_MotivationWorst,
+                _ => throw new InvalidDataException($"未知干劲值: {@event.data.chara_info.motivation}")
+            };
 
             var availableTrainingCount = @event.data.home_info.command_info_array.Count(x => x.is_enable == 1);
             if (availableTrainingCount <= 1)
-            {
-                critInfos.Add("[aqua]非训练回合[/]");
-            }
+                critInfos.Add("非训练回合");
+
             if (@event.data.chara_info.skill_point > 9500)
+                critInfos.Add("剩余PT>9500（上限9999），请及时学习技能");
+
+            var lines = new List<string>
             {
-                critInfos.Add("[red]剩余PT>9500（上限9999），请及时学习技能");
+                $"{turn.Year}{I18N_Year} {turn.Month}{I18N_Month}{turn.HalfMonth}"
+                    + $" | 总属性: {totalValue}, Pt: {@event.data.chara_info.skill_point}"
+                    + $" | {I18N_Vital}: {turn.Vital}/{turn.MaxVital}"
+                    + $" | {motivation}"
+            };
+            if (critInfos.Count > 0)
+            {
+                lines.Add(string.Empty);
+                lines.Add("== 重要信息 ==");
+                lines.AddRange(critInfos);
             }
-            layout["重要信息"].Update(new Panel(string.Join(Environment.NewLine, critInfos)).Expand());
-
-            layout["Ext"].Update(exTable);
-
-            GameStats.Print();
-
-            AnsiConsole.Write(layout);
-            // 光标倒转一点
-            if (noTrainingTable)
-                AnsiConsole.Cursor.SetPosition(0, 15);
-            else
-                AnsiConsole.Cursor.SetPosition(0, 31);
+            if (scenarioRows.Count > 0)
+            {
+                lines.Add(string.Empty);
+                lines.Add("== 剧本信息 ==");
+                lines.AddRange(scenarioRows);
+            }
+            lines.Add(string.Empty);
+            lines.Add("== 训练信息 ==");
+            lines.AddRange(trainingRows);
+            if (extraRows.Any(x => !string.IsNullOrWhiteSpace(x)))
+            {
+                lines.Add(string.Empty);
+                lines.Add("== Extras ==");
+                lines.AddRange(extraRows.Where(x => !string.IsNullOrWhiteSpace(x)));
+            }
+            return WorkspaceContent.Text(string.Join(Environment.NewLine, lines));
         }
     }
 }

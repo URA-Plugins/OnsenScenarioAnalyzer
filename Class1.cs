@@ -1,71 +1,64 @@
-﻿using Newtonsoft.Json.Linq;
-using Spectre.Console;
-using System.IO.Compression;
-using UmamusumeResponseAnalyzer;
+using Gallop;
+using Gallop.Endpoints;
+using UmamusumeResponseAnalyzer.TerminalGui;
 using UmamusumeResponseAnalyzer.Plugin;
 
 namespace OnsenScenarioAnalyzer
 {
     public class OnsenScenarioAnalyzer : IPlugin
     {
-        [PluginDescription("解析温泉杯回合信息")]
-        public string Name => "OnsenScenarioAnalyzer";
-        public string Author => "离披";
-        public string[] Targets => ["Cygames"];
-        public async Task UpdatePlugin(ProgressContext ctx)
+        const string WorkspaceTitle = "OnsenScenarioAnalyzer";
+        const string TrainingPanelKey = "training";
+
+        Workspace? workspace;
+        bool hasPublishedTrainingPanel;
+
+        static readonly string DataDirectory = Path.Combine("PluginData", "OnsenScenarioAnalyzer");
+
+        public void Initialize(IPluginContext context)
         {
-            var progress = ctx.AddTask($"[[{Name}]] 更新");
-
-            using var client = new HttpClient();
-            using var resp = await client.GetAsync($"https://api.github.com/repos/URA-Plugins/{Name}/releases/latest");
-            var json = await resp.Content.ReadAsStringAsync();
-            var jo = JObject.Parse(json);
-
-            var isLatest = ("v" + ((IPlugin)this).Version.ToString()).Equals("v" + jo["tag_name"]?.ToString());
-            if (isLatest)
-            {
-                progress.Increment(progress.MaxValue);
-                progress.StopTask();
-                return;
-            }
-            progress.Increment(25);
-
-            var downloadUrl = jo["assets"][0]["browser_download_url"].ToString();
-            if (Config.Updater.IsGithubBlocked && !Config.Updater.ForceUseGithubToUpdate)
-            {
-                downloadUrl = downloadUrl.Replace("https://", "https://gh.shuise.dev/");
-            }
-            using var msg = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
-            using var stream = await msg.Content.ReadAsStreamAsync();
-            var buffer = new byte[8192];
-            while (true)
-            {
-                var read = await stream.ReadAsync(buffer);
-                if (read == 0)
-                    break;
-                progress.Increment(read / msg.Content.Headers.ContentLength ?? 1 * 0.5);
-            }
-            using var archive = new ZipArchive(stream);
-            archive.ExtractToDirectory(Path.Combine("Plugins", Name), true);
-            progress.Increment(25);
-
-            progress.StopTask();
+            hasPublishedTrainingPanel = false;
+            Handler.DataDirectory = DataDirectory;
+            Directory.CreateDirectory(Handler.DataDirectory);
         }
 
-        [Analyzer(priority: 1)]
-        public void Analyzer(JObject jo)
+        public void Dispose()
         {
-            if (!jo.HasCharaInfo()) return;
-            if (jo["data"] is null || jo["data"] is not JObject data) return;
-            if (data["chara_info"] is null || data["chara_info"] is not JObject chara_info) return;
-            if (chara_info["scenario_id"].ToInt() != (int)ScenarioType.Onsen) return;
-            var state = chara_info["state"].ToInt();
-            if (chara_info != null && data["home_info"]?["command_info_array"] != null && data["race_reward_info"].IsNull() && !(state is 2 or 3)) //根据文本简单过滤防止重复、异常输出
+            if (!hasPublishedTrainingPanel || workspace is not { } publishedWorkspace)
+                return;
+
+            publishedWorkspace.RemovePanel(TrainingPanelKey);
+            hasPublishedTrainingPanel = false;
+        }
+
+        [ResponseAnalyzer<GameApi.SingleModeOnsen.CheckEvent>(1)]
+        public ValueTask Analyzer(SingleModeOnsenCheckEventResponse @event)
+        {
+            var data = @event.data;
+            if (data.chara_info.scenario_id != 12) return ValueTask.CompletedTask;
+            var state = data.chara_info.state;
+            if (data.home_info?.command_info_array is not null && !(state is 2 or 3)) //根据文本简单过滤防止重复、异常输出
             {
-                var @event = jo.ToObject<Gallop.SingleModeCheckEventResponse>();
-                if ((@event.data.unchecked_event_array != null && @event.data.unchecked_event_array.Length > 0) || @event.data.race_start_info != null) return;
-                Handler.ParseOnsenCommandInfo(@event);
+                if ((@event.data.unchecked_event_array != null && @event.data.unchecked_event_array.Length > 0) || @event.data.race_start_info != null) return ValueTask.CompletedTask;
+                if (Handler.GetCommandInfoStage_legend(@event) == 0)
+                    return ValueTask.CompletedTask;
+
+                PublishTrainingPanel(Handler.ParseOnsenCommandInfo(@event));
             }
+
+            return ValueTask.CompletedTask;
+        }
+
+        void PublishTrainingPanel(WorkspaceContent content)
+        {
+            var workspace = this.workspace ??= Workspace.Create(WorkspaceTitle);
+            workspace.SetPanel(
+                TrainingPanelKey,
+                "训练分析",
+                content,
+                fullBleed: true,
+                switchToWorkspace: !hasPublishedTrainingPanel);
+            hasPublishedTrainingPanel = true;
         }
     }
 }
