@@ -76,14 +76,14 @@ public class OnsenScenarioAnalyzer : IPlugin
         Directory.CreateDirectory(Handler.DataDirectory);
     }
 
-    public void Dispose()
+    public ValueTask DisposeAsync()
     {
         HistoryView? view;
         Workspace? publishedWorkspace;
         lock (historyGate)
         {
             if (disposed)
-                return;
+                return ValueTask.CompletedTask;
 
             disposed = true;
             generation++;
@@ -101,6 +101,7 @@ public class OnsenScenarioAnalyzer : IPlugin
 
         view?.Stop();
         publishedWorkspace?.RemovePanel(TrainingPanelKey);
+        return ValueTask.CompletedTask;
     }
 
     public async Task ConfigPromptAsync(

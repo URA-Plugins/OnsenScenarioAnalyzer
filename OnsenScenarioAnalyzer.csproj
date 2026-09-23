@@ -13,7 +13,6 @@
 		<PluginAuthor>xulai1001</PluginAuthor>
 		<PluginDescription>解析温泉杯回合信息</PluginDescription>
 		<PluginRepositoryUrl>https://github.com/URA-Plugins/OnsenScenarioAnalyzer</PluginRepositoryUrl>
-		<PluginTargets>Cygames</PluginTargets>
 		<PluginDependencies>EventLoggerPlugin</PluginDependencies>
 	</PropertyGroup>
 
