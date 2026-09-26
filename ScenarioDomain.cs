@@ -151,8 +151,9 @@ internal sealed class TrainingPartner
         if (!IsNpc)
         {
             CardId = turn.SupportCards[Position];
+            var supportCard = Database.Names.GetRequiredSupportCard(CardId);
             var name = Database.Names.DisplayNickname(CardId);
-            if (name.Contains("[友]"))
+            if (supportCard.IsFriendCard)
             {
                 Priority = PartnerPriority.友人;
             }
@@ -161,19 +162,11 @@ internal sealed class TrainingPartner
                 Priority = PartnerPriority.羁绊不足;
             }
 
-            Shining = Friendship >= 80 && name.Contains((toTrainIdDictionary ?? ToTrainIdDefault)[command.command_id] switch
-            {
-                101 => "[速]",
-                105 => "[耐]",
-                102 => "[力]",
-                103 => "[根]",
-                106 => "[智]",
-                _ => string.Empty
-            });
+            Shining = Friendship >= 80 && supportCard.Type == (toTrainIdDictionary ?? ToTrainIdDefault)[command.command_id];
 
             if (Shining)
             {
-                Priority = name.Contains("[友]") ? PartnerPriority.友人 : PartnerPriority.闪;
+                Priority = supportCard.IsFriendCard ? PartnerPriority.友人 : PartnerPriority.闪;
             }
 
             var append = Friendship < 100 ? $" {Friendship}" : string.Empty;
