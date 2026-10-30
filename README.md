@@ -27,6 +27,8 @@
 
 ## 构建
 
+Host SDK `2026.10.31.1` 对应的 Host 使用 Terminal.Gui `2.5.0`，无法加载依赖 Terminal.Gui `2.4.17` 的已归档 `LegendScenarioAnalyzer v2026.9.26` 正式 ZIP。EventLogger 的 Legend 联动为可选，本插件不要求安装该 ZIP。
+
 ```powershell
 git -c core.longpaths=true submodule update --init --recursive
 dotnet build .\OnsenScenarioAnalyzer.csproj -c Release -m:1 -p:RuntimeIdentifier=win-x64 -p:SelfContained=false -p:PlatformTarget=AnyCPU -p:DeployUraPluginToLocalAppDataOnBuild=false

@@ -5,7 +5,8 @@
 		<TargetFramework>net10.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
-		<Version>2026.9.26</Version>
+		<Version>2026.10.31</Version>
+		<PluginChangelog>更新 Host SDK 和构建依赖。</PluginChangelog>
 
 		<!-- URA 插件元数据：供发布 manifest 使用 -->
 		<PluginInternalName>OnsenScenarioAnalyzer</PluginInternalName>
